@@ -3,13 +3,16 @@
 package dracer
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/opentracing/opentracing-go"
-
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/api/types"
 	zipkin "github.com/openzipkin/zipkin-go-opentracing"
-	"time"
+	"github.com/docker/docker/api/types/events"
+	"strings"
 )
 
 const (
@@ -31,9 +34,12 @@ const (
 )
 
 type DockerTracer struct {
-	do DracerOptions
-	dockerSocket 	string
-	debug			bool
+	do 			DracerOptions
+	engCli 		*client.Client
+	msgs 		<-chan events.Message
+	errs 		<-chan error
+	sMap 		map[string]TraceSupervisor
+
 }
 
 func NewDracer(opts ...DracerOption) DockerTracer {
@@ -43,21 +49,38 @@ func NewDracer(opts ...DracerOption) DockerTracer {
 	}
 	return DockerTracer{
 		do: options,
+		sMap: make(map[string]TraceSupervisor),
 	}
 }
 
-func (dt *DockerTracer) Run() {
-	fmt.Println("huhu")
-	// Create our HTTP collector.
-	collector, err := zipkin.NewHTTPCollector(dt.do.ZipkinEndpoint)
+func (dt *DockerTracer) Connect() {
+	var err error
+	dt.engCli, err = client.NewClient(dt.do.DockerSocket, "v1.29", nil, nil)
 	if err != nil {
-		fmt.Printf("unable to create Zipkin HTTP collector: %+v\n", err)
-		os.Exit(-1)
+		fmt.Printf("Could not connect docker/docker/client to '%s': %v", dt.do.DockerSocket, err)
+		return
 	}
+	dt.msgs, dt.errs = dt.engCli.Events(context.Background(), types.EventsOptions{})
 
+}
+
+func (dt *DockerTracer) StartSupervisor(CntID, CntName string) {
+	ts := TraceSupervisor{
+		CntID: CntID,
+		CntName: CntName,
+		Com: make(chan events.Message),
+	}
+	dt.sMap[CntID] = ts
+	go ts.Run()
+}
+
+func (dt *DockerTracer) Run() {
+	dt.Connect()
+	collector, _ := zipkin.NewHTTPCollector(dt.do.ZipkinEndpoint)
 	// Create our recorder.
 	recorder := zipkin.NewRecorder(collector, dt.do.Debug, hostPort, "docker")
 
+	var err error
 	// Create our tracer.
 	tracer, err := zipkin.NewTracer(
 		recorder,
@@ -68,26 +91,32 @@ func (dt *DockerTracer) Run() {
 		fmt.Printf("unable to create Zipkin tracer: %+v\n", err)
 		os.Exit(-1)
 	}
-
 	// Explicitly set our tracer to be the default tracer.
 	opentracing.InitGlobalTracer(tracer)
 
-	// Create Root Span for duration of the interaction with svc1
-	span := opentracing.StartSpan("Run")
 
-	t1 := span.Tracer()
-	s1 := t1.StartSpan("sub1")
-	time.Sleep(1)
-	s1.Finish()
-	// Call the Concat Method
-	span.LogEvent("Call Concat")
-
-	// Call the Sum Method
-	span.LogEvent("Call Sum")
-
-	// Finish our CLI span
-	span.Finish()
-
-	// Close collector to ensure spans are sent before exiting.
-	collector.Close()
+	for {
+		select {
+		case dMsg := <-dt.msgs:
+			switch dMsg.Type {
+			case "container":
+				if strings.HasPrefix(dMsg.Action, "exec_") {
+					continue
+				}
+				fmt.Printf("%s.%s: %s\n", dMsg.Type, dMsg.Action, dMsg.Actor.ID)
+				switch dMsg.Action {
+				case "create":
+					dt.StartSupervisor(dMsg.Actor.ID, dMsg.Actor.Attributes["name"])
+				default:
+					dt.sMap[dMsg.Actor.ID].Com <- dMsg
+				}
+			case "service":
+				//dt.RecordServiceEvent(dMsg)
+			}
+		case dErr := <-dt.errs:
+			if dErr != nil {
+				continue
+			}
+		}
+	}
 }
