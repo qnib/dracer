@@ -51,7 +51,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "Tracer for docker events comming from the docker engine."
 	app.Usage = "dracer [options]"
-	app.Version = "0.0.0"
+	app.Version = "0.1.0"
 	app.Flags = []cli.Flag{
 		debugFlag,
 		dockerSocketFlag,
