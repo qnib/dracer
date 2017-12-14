@@ -5,8 +5,8 @@ services:
     ports:
       - 9411:9411
 
-  dracer:
-    image: qnib/dracer:dirty
+  tracer:
+    image: qnib/dracer:0.1.0@sha256:e3172a5000dcd619503d2f5e9d095bcea5bd517509e274df8bfe362dfdcb209e
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
