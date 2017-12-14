@@ -1,0 +1,13 @@
+version: '3'
+services:
+  zipkin:
+    image: qnib/plain-zipkin:2.4.0
+    ports:
+      - 9411:9411
+
+  dracer:
+    image: qnib/dracer:dirty
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DRACER_ZIPKIN_ENDPOINT=http://tasks.zipkin:9411/api/v1/spans

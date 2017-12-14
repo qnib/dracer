@@ -64,14 +64,14 @@ func (dt *DockerTracer) Connect() {
 
 }
 
-func (dt *DockerTracer) StartSupervisor(CntID, CntName string) {
+func (dt *DockerTracer) StartSupervisor(CntID, CntName, CntAction string) {
 	ts := TraceSupervisor{
 		CntID: CntID,
 		CntName: CntName,
 		Com: make(chan events.Message),
 	}
 	dt.sMap[CntID] = ts
-	go ts.Run()
+	go ts.Run(CntAction)
 }
 
 func (dt *DockerTracer) Run() {
@@ -100,16 +100,14 @@ func (dt *DockerTracer) Run() {
 		case dMsg := <-dt.msgs:
 			switch dMsg.Type {
 			case "container":
-				if strings.HasPrefix(dMsg.Action, "exec_") {
+				if strings.HasPrefix(dMsg.Action, "exec_") || strings.HasPrefix(dMsg.Action, "health_status") {
 					continue
 				}
 				fmt.Printf("%s.%s: %s\n", dMsg.Type, dMsg.Action, dMsg.Actor.ID)
-				switch dMsg.Action {
-				case "create":
-					dt.StartSupervisor(dMsg.Actor.ID, dMsg.Actor.Attributes["name"])
-				default:
-					dt.sMap[dMsg.Actor.ID].Com <- dMsg
+				if _, ok := dt.sMap[dMsg.Actor.ID]; !ok {
+					dt.StartSupervisor(dMsg.Actor.ID, dMsg.Actor.Attributes["name"], dMsg.Action)
 				}
+				dt.sMap[dMsg.Actor.ID].Com <- dMsg
 			case "service":
 				//dt.RecordServiceEvent(dMsg)
 			}

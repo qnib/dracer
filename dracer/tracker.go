@@ -13,18 +13,21 @@ type TraceSupervisor struct {
 	Com 	chan events.Message // Channel to communicate with goroutine
 }
 
-func (ts *TraceSupervisor) Run() {
+func (ts *TraceSupervisor) Run(CntAction string) {
 	log.Printf("[II] Start listener for: '%s' [%s]", ts.CntName, ts.CntID[:12])
 	span := opentracing.StartSpan(ts.CntName)
-	span.LogEvent("create")
-	defer span.Finish()
+	if CntAction == "create" {
+		span.LogEvent("create")
+	} else {
+		span.LogEvent("discovered")
+	}
 	for {
 		select {
 		case msg := <-ts.Com:
 			span.LogEvent(msg.Action)
 			switch msg.Action {
 			case "destroy":
-				return
+				span.Finish()
 			}
 		}
 	}
